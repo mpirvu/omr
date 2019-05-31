@@ -212,6 +212,12 @@ typedef struct J9MemorySegmentList {
 	uintptr_t flags;
 } J9MemorySegmentList;
 
+
+typedef struct CodeCacheHeader {
+	uint8_t *warmCodeAlloc;
+	uint8_t *coldCodeAlloc;
+} CodeCacheHeader;
+
 #if defined(OMR_GC_REALTIME)
 
 typedef struct MM_GCRememberedSet {

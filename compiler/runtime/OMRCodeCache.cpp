@@ -227,10 +227,10 @@ OMR::CodeCache::trimCodeMemoryAllocation(void *codeMemoryStart, size_t actualSiz
       TR_VerboseLog::writeLineLocked(TR_Vlog_CODECACHE,"--trimCodeMemoryAllocation-- CC=%p cacheHeader=%p oldSize=%u actualSizeInBytes=%d shrinkage=%u", this, cacheHeader, oldSize, actualSizeInBytes, shrinkage);
       }
 
-   if (expectedHeapAlloc == _warmCodeAlloc)
+   if (expectedHeapAlloc == self()->getWarmCodeAlloc())
       {
       _manager->increaseFreeSpaceInCodeCacheRepository(shrinkage);
-      _warmCodeAlloc -= shrinkage;
+      self()->setWarmCodeAlloc(self()->getWarmCodeAlloc() - shrinkage);
       cacheHeader->_size = actualSizeInBytes;
       return true;
       }
@@ -300,9 +300,8 @@ OMR::CodeCache::initialize(TR::CodeCacheManager *manager,
    _lastAllocatedBlock = NULL; // MP
 
    *((TR::CodeCache **)(_segment->segmentBase())) = self(); // Write a pointer to this cache at the beginning of the segment
-   _warmCodeAlloc = _segment->segmentBase() + sizeof(this);
-
-   _warmCodeAlloc = align(_warmCodeAlloc, config.codeCacheAlignment() -  1);
+   self()->setWarmCodeAlloc(_segment->segmentBase() + sizeof(this));
+   self()->alignWarmCodeAlloc(config.codeCacheAlignment() -  1);
 
    if (!config.trampolineCodeSize())
       {
@@ -315,7 +314,7 @@ OMR::CodeCache::initialize(TR::CodeCacheManager *manager,
       _CCPreLoadedCodeTop = (uint8_t *)(((size_t)_trampolineBase) & (~config.codeCacheHelperAlignmentMask()));
       _CCPreLoadedCodeBase = _CCPreLoadedCodeTop - config.ccPreLoadedCodeSize();
       TR_ASSERT( (((size_t)_CCPreLoadedCodeBase) & config.codeCacheHelperAlignmentMask()) == 0, "Per-code cache helper sizes do not account for alignment requirements." );
-      _coldCodeAlloc = _CCPreLoadedCodeBase;
+      self()->setColdCodeAlloc(_CCPreLoadedCodeBase);
       _trampolineSyncList = NULL;
 
       return true;
@@ -371,7 +370,7 @@ OMR::CodeCache::initialize(TR::CodeCacheManager *manager,
    _CCPreLoadedCodeTop = (uint8_t *)(((size_t)_trampolineBase) & (~config.codeCacheHelperAlignmentMask()));
    _CCPreLoadedCodeBase = _CCPreLoadedCodeTop - config.ccPreLoadedCodeSize();
    TR_ASSERT( (((size_t)_CCPreLoadedCodeBase) & config.codeCacheHelperAlignmentMask()) == 0, "Per-code cache helper sizes do not account for alignment requirements." );
-   _coldCodeAlloc = _CCPreLoadedCodeBase;
+   self()->setColdCodeAlloc(_CCPreLoadedCodeBase);
 
    // Set helper trampoline table available
    //
@@ -403,7 +402,7 @@ OMR::CodeCache::initialize(TR::CodeCacheManager *manager,
    // Before returning, let's adjust the free space seen by VM.
    // Usable space is between _warmCodeAlloc and _trampolineBase. Everything else is overhead
    // Only relevant if code cache repository is used
-   size_t spaceLost = (_warmCodeAlloc - _segment->segmentBase()) + (_segment->segmentTop() - _trampolineBase);
+   size_t spaceLost = (self()->getWarmCodeAlloc() - _segment->segmentBase()) + (_segment->segmentTop() - _trampolineBase);
    _manager->decreaseFreeSpaceInCodeCacheRepository(spaceLost);
 
    return true;
@@ -983,7 +982,7 @@ OMR::CodeCache::addFreeBlock2WithCallSite(uint8_t *start,
          // merge with the curr block ahead, which is also the first block
          TR_ASSERT(end <= (uint8_t *)curr, "assertion failure"); // check for no overlap of blocks
          // we should not merge warm block with cold blocks
-         if (!(start < _warmCodeAlloc && (uint8_t *)curr >= _coldCodeAlloc))
+         if (!(start < self()->getWarmCodeAlloc() && (uint8_t *)curr >= self()->getColdCodeAlloc()))
             {
             // which is also the first block
             link = (CodeCacheFreeCacheBlock *) start;
@@ -996,11 +995,11 @@ OMR::CodeCache::addFreeBlock2WithCallSite(uint8_t *start,
             }
          }
       else if (curr->_next && ((uint8_t *)curr->_next - end < sizeof(CodeCacheFreeCacheBlock)) &&
-         !(start < _warmCodeAlloc && (uint8_t *)curr->_next >= _coldCodeAlloc))
+         !(start < self()->getWarmCodeAlloc() && (uint8_t *)curr->_next >= self()->getColdCodeAlloc()))
          {
          // merge with the next block, but don't merge warm blocks with cold blocks
          if ((start - ((uint8_t *)curr + curr->_size) < sizeof(CodeCacheFreeCacheBlock)) &&
-             !((uint8_t *)curr < _warmCodeAlloc && start >= _coldCodeAlloc))
+             !((uint8_t *)curr < self()->getWarmCodeAlloc() && start >= self()->getColdCodeAlloc()))
             {
             // merge with the previous and the next blocks
             mergedBlock = curr;
@@ -1027,7 +1026,7 @@ OMR::CodeCache::addFreeBlock2WithCallSite(uint8_t *start,
       else if ((uint8_t *)curr < start && start - ((uint8_t *)curr + curr->_size) < sizeof(CodeCacheFreeCacheBlock))
          {
          // merge with the previous block
-         if (!((uint8_t *)curr < _warmCodeAlloc && start >= _coldCodeAlloc))
+         if (!((uint8_t *)curr < self()->getWarmCodeAlloc() && start >= self()->getColdCodeAlloc()))
             {
             mergedBlock = curr;
             curr->_size = start + size - (uint8_t *)curr;
@@ -1068,7 +1067,7 @@ OMR::CodeCache::addFreeBlock2WithCallSite(uint8_t *start,
    if (config.verboseReclamation())
       {
       TR_VerboseLog::writeLineLocked(TR_Vlog_CODECACHE,"--ccr-- addFreeBlock2WithCallSite CC=%p start=%p end=%p mergedBlock=%p link=%p link->_size=%u, _sizeOfLargestFreeWarmBlock=%d _sizeOfLargestFreeColdBlock=%d warmCodeAlloc=%p coldBlockAlloc=%p",
-         this,  (void*)start, (void*)end, mergedBlock, link, (uint32_t)link->_size, _sizeOfLargestFreeWarmBlock, _sizeOfLargestFreeColdBlock, _warmCodeAlloc, _coldCodeAlloc);
+         this,  (void*)start, (void*)end, mergedBlock, link, (uint32_t)link->_size, _sizeOfLargestFreeWarmBlock, _sizeOfLargestFreeColdBlock, self()->getWarmCodeAlloc(), self()->getColdCodeAlloc());
       }
 #ifdef DEBUG
    uint8_t *paintStart = start + sizeof(CodeCacheFreeCacheBlock);
@@ -1088,7 +1087,7 @@ OMR::CodeCache::updateMaxSizeOfFreeBlocks(CodeCacheFreeCacheBlock *blockPtr, siz
    TR::CodeCacheConfig &config = _manager->codeCacheConfig();
    if (config.codeCacheFreeBlockRecylingEnabled())
       {
-      if ((uint8_t *)blockPtr < _warmCodeAlloc)
+      if ((uint8_t *)blockPtr < self()->getWarmCodeAlloc())
          {
          if (blockSize > _sizeOfLargestFreeWarmBlock)
             {
@@ -1124,12 +1123,12 @@ OMR::CodeCache::findFreeBlock(size_t size, bool isCold, bool isMethodHeaderNeede
       {
       if (isCold)
          {
-         if ((void*)currLink < (void*)_coldCodeAlloc)
+         if ((void*)currLink < (void*)self()->getColdCodeAlloc())
             continue;
          }
       else
          {
-         if ((void*)currLink >= (void*)_warmCodeAlloc)
+         if ((void*)currLink >= (void*)self()->getWarmCodeAlloc())
             continue;
          // curLink is warm code
          }
@@ -1274,8 +1273,8 @@ void
 OMR::CodeCache::dumpCodeCache()
    {
    printf("Code Cache @%p\n", this);
-   printf("  |-- warmCodeAlloc          = 0x%08" OMR_PRIxPTR "\n", (uintptr_t)_warmCodeAlloc );
-   printf("  |-- coldCodeAlloc          = 0x%08" OMR_PRIxPTR "\n", (uintptr_t)_coldCodeAlloc );
+   printf("  |-- warmCodeAlloc          = 0x%08" OMR_PRIxPTR "\n", (uintptr_t)self()->getWarmCodeAlloc() );
+   printf("  |-- coldCodeAlloc          = 0x%08" OMR_PRIxPTR "\n", (uintptr_t)self()->getColdCodeAlloc() );
    printf("  |-- tempTrampsMax          = %d\n",     _tempTrampolinesMax );
    printf("  |-- flags                  = %d\n",     _flags );
    printf("  |-- next                   = 0x%p\n",   _next );
@@ -1287,7 +1286,7 @@ OMR::CodeCache::printOccupancyStats()
    {
    fprintf(stderr, "Code Cache @%p flags=0x%x almostFull=%d\n", this, _flags, _almostFull);
    fprintf(stderr, "   cold-warm hole size        = %8" OMR_PRIuSIZE " bytes\n", self()->getFreeContiguousSpace());
-   fprintf(stderr, "   warmCodeAlloc=%p coldCodeAlloc=%p\n", (void*)_warmCodeAlloc, (void*)_coldCodeAlloc);
+   fprintf(stderr, "   warmCodeAlloc=%p coldCodeAlloc=%p\n", (void*)self()->getWarmCodeAlloc(), (void*)self()->getColdCodeAlloc());
    if (_freeBlockList)
       {
       fprintf(stderr, "   sizeOfLargestFreeColdBlock = %8" OMR_PRIuSIZE " bytes\n", _sizeOfLargestFreeColdBlock);
@@ -1371,7 +1370,7 @@ OMR::CodeCache::checkForErrors()
                   {
                   // Two freed blocks can be adjacent if one belongs to the warm region
                   // and the other one belongs to the cold region
-                  if (!((uint8_t*)currLink < _warmCodeAlloc && endBlock >= _coldCodeAlloc))
+                  if (!((uint8_t*)currLink < self()->getWarmCodeAlloc() && endBlock >= self()->getColdCodeAlloc()))
                      {
                      fprintf(stderr, "checkForErrors cache %p: Error: missed freed block coalescing opportunity. Next block (%p) is adjacent to current one %p-%p\n", this, currLink->_next, currLink, endBlock);
                      doCrash = true;
@@ -1385,7 +1384,7 @@ OMR::CodeCache::checkForErrors()
                      doCrash = true;;
                      }
                   // A free block is always followed by a used block except when this is the last free block in the warm region
-                  if (endBlock != _warmCodeAlloc)
+                  if (endBlock != self()->getWarmCodeAlloc())
                      {
                      // There should be valid code between this block and the next
                      uint8_t* eyeCatcherPosition = endBlock+offsetof(CodeCacheMethodHeader, _eyeCatcher);
@@ -1397,7 +1396,7 @@ OMR::CodeCache::checkForErrors()
                      }
                   }
                }
-            if ((uint8_t*)currLink < _warmCodeAlloc) // warm block
+            if ((uint8_t*)currLink < self()->getWarmCodeAlloc()) // warm block
                {
                if (currLink->_size > maxFreeWarmSize)
                   maxFreeWarmSize = currLink->_size;
@@ -1452,8 +1451,8 @@ OMR::CodeCache::checkForErrors()
                      {
                      prevBlock = start;
                      start = start + ((CodeCacheMethodHeader*)start)->_size;
-                     if (start >= _warmCodeAlloc)
-                        start = _coldCodeAlloc;
+                     if (start >= self()->getWarmCodeAlloc())
+                        start = self()->getColdCodeAlloc();
                      continue;
                      }
                   else
@@ -1543,14 +1542,14 @@ OMR::CodeCache::allocateCodeMemory(size_t warmCodeSize,
       if (warmSize)
          {
          // Try to allocate a block from the code cache heap
-         cacheHeapAlloc  = _warmCodeAlloc;
+         cacheHeapAlloc  = self()->getWarmCodeAlloc();
 
          cacheHeapAlloc = (uint8_t*)(((size_t)cacheHeapAlloc + round) & ~round);
          warmCodeAddress = cacheHeapAlloc;
          cacheHeapAlloc += warmSize;
 
          // Do we have enough space in codeCache to allocate the warm code?
-         if (cacheHeapAlloc > _coldCodeAlloc)
+         if (cacheHeapAlloc > self()->getColdCodeAlloc())
             {
             // No - just return failure
             //
@@ -1559,13 +1558,13 @@ OMR::CodeCache::allocateCodeMemory(size_t warmCodeSize,
 
          // _warmCodeAlloc will change to its new value 'cacheHeapAlloc'
          // Thus the free code cache space decreases by (cacheHeapAlloc-_warmCodeAlloc)
-         _manager->decreaseFreeSpaceInCodeCacheRepository(cacheHeapAlloc-_warmCodeAlloc);
-         _warmCodeAlloc = cacheHeapAlloc;
+         _manager->decreaseFreeSpaceInCodeCacheRepository(cacheHeapAlloc-self()->getWarmCodeAlloc());
+         self()->setWarmCodeAlloc(cacheHeapAlloc);
          if (isMethodHeaderNeeded)
             self()->writeMethodHeader(warmCodeAddress, warmSize, false);
          }
       else
-         warmCodeAddress = _warmCodeAlloc;
+         warmCodeAddress = self()->getWarmCodeAlloc();
       }
    else
       {
@@ -1583,10 +1582,10 @@ OMR::CodeCache::allocateCodeMemory(size_t warmCodeSize,
       {
       if (coldSize)
          {
-         cacheHeapAlloc = _coldCodeAlloc - coldSize;
+         cacheHeapAlloc = self()->getColdCodeAlloc() - coldSize;
          cacheHeapAlloc = (uint8_t *)(((size_t)cacheHeapAlloc) & ~round);
          // Do we have enough space in codeCache to allocate the warm code?
-         if (cacheHeapAlloc < _warmCodeAlloc)
+         if (cacheHeapAlloc < self()->getWarmCodeAlloc())
             {
             // This case should never happen now because we checked above that both warm and cold can be allocated
             TR_ASSERT(false, "Must be able to find space for cold code");
@@ -1594,18 +1593,18 @@ OMR::CodeCache::allocateCodeMemory(size_t warmCodeSize,
             //
             if (!warmIsFreeBlock)
                {
-               _warmCodeAlloc = warmCodeAddress;
+               self()->setWarmCodeAlloc(warmCodeAddress);
                }
             return NULL;
             }
-         _manager->decreaseFreeSpaceInCodeCacheRepository(_coldCodeAlloc - cacheHeapAlloc);
-         _coldCodeAlloc = cacheHeapAlloc;
+         _manager->decreaseFreeSpaceInCodeCacheRepository(self()->getColdCodeAlloc() - cacheHeapAlloc);
+         self()->setColdCodeAlloc(cacheHeapAlloc);
          coldCodeAddress = cacheHeapAlloc;
          if (isMethodHeaderNeeded)
             self()->writeMethodHeader(coldCodeAddress, coldSize, true);
          }
       else
-         coldCodeAddress = _coldCodeAlloc;
+         coldCodeAddress = self()->getColdCodeAlloc();
       }
    else
       {

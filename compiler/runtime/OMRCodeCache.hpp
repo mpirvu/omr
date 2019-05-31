@@ -40,6 +40,7 @@ namespace OMR { typedef CodeCache CodeCacheConnector; }
 #include "runtime/CodeCacheConfig.hpp"
 #include "runtime/Runtime.hpp"
 #include "runtime/CodeCacheTypes.hpp"
+#include "j9nongenerated.h"
 
 class TR_OpaqueMethodBlock;
 namespace TR { class CodeCache; }
@@ -52,29 +53,28 @@ extern uint8_t *align(uint8_t *ptr, uint32_t alignment);
 
 namespace OMR
 {
-
-// Base class capturing VM dependency on the _warmCodeAlloc and _coldCodeAlloc pointers at the
-// beginning of a code cache object. Do not change this base class without fully appreciating this
-// dependency.
+// Base class capturing VM dependency on the CodeCacheHeader containing 
+// warmCodeAlloc and coldCodeAlloc pointers at the beginning of a code cache object. 
+// Do not change this base class without fully appreciating this dependency.
 //
 class CodeCacheBase
    {
 public:
-   void setWarmCodeAlloc(uint8_t *wca)   { _warmCodeAlloc = wca; }
-   void setColdCodeAlloc(uint8_t *cca)   { _coldCodeAlloc = cca; }
+   void setWarmCodeAlloc(uint8_t *wca)   { _codeCacheHeader.warmCodeAlloc = wca; }
+   void setColdCodeAlloc(uint8_t *cca)   { _codeCacheHeader.coldCodeAlloc = cca; }
 
-   uint8_t *getWarmCodeAlloc()   { return _warmCodeAlloc; }
-   uint8_t *getColdCodeAlloc()   { return _coldCodeAlloc; }
+   uint8_t *getWarmCodeAlloc() const { return _codeCacheHeader.warmCodeAlloc; }
+   uint8_t *getColdCodeAlloc() const  { return _codeCacheHeader.coldCodeAlloc; }
 
-   void alignWarmCodeAlloc(uint32_t round)  { _warmCodeAlloc = align(_warmCodeAlloc, round); }
-   void alignColdCodeAlloc(uint32_t round)  { _coldCodeAlloc = align(_coldCodeAlloc, round); }
+   void alignWarmCodeAlloc(uint32_t round)  { _codeCacheHeader.warmCodeAlloc = align(_codeCacheHeader.warmCodeAlloc, round); }
+   void alignColdCodeAlloc(uint32_t round)  { _codeCacheHeader.coldCodeAlloc = align(_codeCacheHeader.coldCodeAlloc, round); }
 
-   // NOTE: warmCodeAlloc and coldCodeAlloc must be the first 2 entries
+   size_t getFreeContiguousSpace() const { return getColdCodeAlloc() - getWarmCodeAlloc(); }
+private:
+   // NOTE: CodeCacheHeader must be the first entry
    // Other components depend on it !!
    //----------------
-
-   uint8_t * _warmCodeAlloc;
-   uint8_t * _coldCodeAlloc;
+   CodeCacheHeader _codeCacheHeader;
    };
 
 
@@ -187,7 +187,6 @@ public:
 
    void                       freeHashEntry(CodeCacheHashEntry *entry);
 
-   size_t                     getFreeContiguousSpace() const        { return _coldCodeAlloc - _warmCodeAlloc; }
    int32_t                    getReservingCompThreadID() const      { return _reservingCompThreadID; }
    void                       setReservingCompThreadID(int32_t n)   { _reservingCompThreadID = n; }
    size_t                     getSizeOfLargestFreeWarmBlock() const { return _sizeOfLargestFreeWarmBlock; }
