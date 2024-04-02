@@ -807,6 +807,11 @@ omrvmem_reserve_memory_ex(struct OMRPortLibrary *portLibrary, struct J9PortVmemI
 	Trc_PRT_vmem_omrvmem_reserve_memory_Entry_replacement(params->startAddress, params->byteAmount, params->pageSize);
 
 	Assert_PRT_true(params->startAddress <= params->endAddress);
+	//#define ASSERT_VALUE_IS_PAGE_SIZE_ALIGNED(value, pageSize)	Assert_PRT_true(0 == ((uintptr_t)(value) % (uintptr_t)(pageSize)))
+	if (0 != ((uintptr_t)(params->byteAmount) % (uintptr_t)(params->pageSize))) {
+		fprintf(stderr, "ASSERT_VALUE_IS_PAGE_SIZE_ALIGNED will fail: size=%zu pageSize=%zu\n", (size_t)(params->byteAmount), (size_t)(params->pageSize));
+		exit(1);
+	}
 	ASSERT_VALUE_IS_PAGE_SIZE_ALIGNED(params->byteAmount, params->pageSize);
 
 	/* Invalid input */
